@@ -1,0 +1,588 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#163a5f">
+  <title>ELAWS LOCATION — Version 9</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <style>
+    :root{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:#172033;background:#f3f6fa}
+    *{box-sizing:border-box} body{margin:0} header{background:#163a5f;color:white;padding:18px 16px}
+    header h1{font-size:1.15rem;margin:0 0 4px} header p{margin:0;font-size:.9rem;opacity:.9}
+    main{max-width:1100px;margin:auto;padding:14px;display:grid;gap:14px}
+    .card{background:white;border:1px solid #dce3ec;border-radius:14px;padding:16px;box-shadow:0 2px 8px #12233a0a}
+    h2{font-size:1.05rem;margin:0 0 12px} label{display:block;font-size:.9rem;font-weight:600;margin:10px 0 5px}
+    input,select,button{font:inherit;width:100%;padding:11px;border:1px solid #cbd5e1;border-radius:9px}
+    button{background:#163a5f;color:white;border:0;font-weight:700;margin-top:10px;cursor:pointer}
+    button.secondary{background:#e7edf5;color:#173a5e} button.danger{background:#9f2633}
+    .row{display:grid;grid-template-columns:1fr;gap:10px}.muted{color:#617087;font-size:.86rem}
+    .notice{padding:10px;border-radius:9px;background:#fff6dc;color:#654b00;font-size:.88rem}
+    #map{height:360px;border-radius:10px;background:#e8edf3;z-index:1} #profileCard hr{border:0;border-top:1px solid #e5eaf1;margin:18px 0} #forgotPasswordBtn{font-size:.9rem}
+    .tablewrap{overflow:auto}table{width:100%;border-collapse:collapse;font-size:.9rem}th,td{text-align:left;padding:10px;border-bottom:1px solid #e5eaf1;vertical-align:top}
+    th{background:#f7f9fc}.status{font-size:.8rem;font-weight:700;color:#25633c}.hidden{display:none!important}
+    .device-actions{display:flex;gap:6px;flex-wrap:wrap}.device-actions button{width:auto;margin:0;padding:7px 9px;font-size:.8rem}
+    footer{max-width:1100px;margin:auto;padding:0 14px 20px;color:#617087;font-size:.8rem}
+    @media(min-width:760px){main{grid-template-columns:1fr 1fr}.wide{grid-column:1/-1}.row.two{grid-template-columns:1fr 1fr}}
+  </style>
+</head>
+<body>
+<header><h1>ELAWS — Localisation des appareils</h1><p>Prototype de gestion autorisée de flotte mobile</p></header>
+<main>
+  <section class="card wide" id="authCard">
+    <h2>Connexion à ELAWS LOCATION</h2>
+    <p class="muted">Connecte-toi avec ton compte. Les appareils et positions accessibles dépendent de tes autorisations.</p>
+    <div class="row two">
+      <div><label for="email">E-mail</label><input id="email" type="email" autocomplete="username" placeholder="admin@entreprise.com"></div>
+      <div><label for="password">Mot de passe</label><input id="password" type="password" autocomplete="current-password" placeholder="Mot de passe robuste"></div>
+    </div>
+    <div class="row two">
+      <button id="loginBtn" type="button">Se connecter</button><button class="secondary" id="signupBtn" type="button">Créer le compte</button>
+    </div>
+    <button type="button" class="secondary" id="forgotPasswordBtn">Mot de passe oublié ? Recevoir un lien par e-mail</button>
+    <p id="authMsg" class="muted" aria-live="polite"></p>
+  </section>
+
+  <section class="card hidden" id="addCard">
+    <h2>Enregistrer un téléphone</h2>
+    <label for="deviceName">Nom interne</label><input id="deviceName" placeholder="Ex. TEL-001">
+    <div class="row two">
+      <div><label for="platform">Plateforme</label><select id="platform"><option>Android</option><option>iPhone</option></select></div>
+      <div><label for="model">Marque / modèle</label><input id="model" placeholder="Ex. Samsung A14"></div>
+    </div>
+    <label for="imei">IMEI (facultatif si non accessible)</label><input id="imei" inputmode="numeric" maxlength="17" placeholder="IMEI vérifié par l'administrateur">
+    <label><input id="consent" type="checkbox" style="width:auto"> Le responsable confirme que l'appareil est autorisé et que son utilisateur est informé.</label>
+    <button id="addBtn">Enregistrer l'appareil</button>
+    <p class="muted">L'IMEI identifie l'appareil, mais ne donne pas sa position. Ne saisis pas de vrais IMEI dans une démonstration publique.</p>
+  </section>
+
+  <section class="card hidden" id="locationCard">
+    <h2>Envoyer la position de cet appareil</h2>
+    <label for="locationDevice">Appareil enregistré</label><select id="locationDevice"></select>
+    <div class="notice">Cette version de démonstration demande la position uniquement lorsque l'utilisateur appuie sur le bouton. Le navigateur doit autoriser la localisation et le site doit être en HTTPS.</div>
+    <button id="locateBtn">Obtenir et envoyer ma position maintenant</button>
+    <p id="locationMsg" class="muted" aria-live="polite"></p>
+  </section>
+
+  <section class="card wide hidden" id="dashboardCard">
+    <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap">
+      <h2>Carte et dernières positions</h2><button class="secondary" id="refreshBtn" style="width:auto;margin:0">Actualiser</button>
+    </div>
+    <div class="row two" style="margin:10px 0">
+      <div><label for="mapLayer">Fond de carte</label><select id="mapLayer"><option value="streets">Rues détaillées</option><option value="satellite">Satellite (si disponible)</option></select></div>
+      <div><label for="mapFocus">Affichage</label><select id="mapFocus"><option value="latest">Dernière position par appareil</option><option value="all">Toutes les positions reçues</option></select></div>
+    </div>
+    <div id="map" aria-label="Carte des dernières positions"></div>
+    <p class="muted">La carte affiche les positions réellement transmises par les appareils autorisés. La précision dépend du GPS, du réseau et des autorisations du téléphone. Une carte satellite n’améliore pas la précision GPS.</p>
+  </section>
+
+  <section class="card wide hidden" id="devicesCard">
+    <h2>Appareils enregistrés</h2>
+    <div class="tablewrap"><table><thead><tr><th>Nom</th><th>Plateforme / modèle</th><th>IMEI</th><th>Dernière position reçue</th><th>Action</th></tr></thead><tbody id="deviceRows"><tr><td colspan="5">Connecte-toi pour afficher les appareils.</td></tr></tbody></table></div>
+    <button class="danger" id="logoutBtn">Se déconnecter</button>
+  </section>
+
+  <section class="card wide hidden" id="callsCard">
+    <h2>Appels audio et vidéo</h2>
+    <p class="muted">Choisis un utilisateur connecté à ELAWS LOCATION. L'appel ne démarre que si l'autre personne l'accepte. Autorise le micro/la caméra dans le navigateur.</p>
+    <label for="callUser">Appeler un utilisateur</label><select id="callUser"><option value="">Chargement des utilisateurs…</option></select>
+    <div class="row two"><button type="button" id="audioCallBtn">Appel audio</button><button type="button" id="videoCallBtn">Appel vidéo</button></div>
+    <p id="callMsg" class="muted" aria-live="polite">Les appels nécessitent HTTPS et des autorisations micro/caméra.</p>
+    <div id="incomingCallBox" class="notice hidden"><strong id="incomingCallText">Appel entrant</strong><div class="row two"><button type="button" id="acceptCallBtn">Accepter</button><button type="button" class="danger" id="rejectCallBtn">Refuser</button></div></div>
+    <div id="activeCallBox" class="hidden"><p id="activeCallText">Appel en cours…</p><div class="row two"><div><label>Moi</label><video id="localCallVideo" autoplay muted playsinline style="width:100%;background:#111;border-radius:8px;max-height:240px"></video></div><div><label>Correspondant</label><video id="remoteCallVideo" autoplay playsinline style="width:100%;background:#111;border-radius:8px;max-height:240px"></video></div></div><button type="button" class="danger" id="hangupCallBtn">Raccrocher</button></div>
+  </section>
+
+  <section class="card wide hidden" id="profileCard">
+    <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap">
+      <h2>Mon profil</h2>
+      <button type="button" class="secondary" id="backToAppBtn" style="width:auto;margin:0">Retour</button>
+    </div>
+    <p><strong>Nom du détenteur :</strong> <span id="profileName">Non renseigné</span></p>
+    <p><strong>Adresse e-mail :</strong> <span id="profileEmail">—</span></p>
+    <p><strong>Rôle :</strong> <span id="profileRole">—</span></p>
+    <hr>
+    <h3>Modifier mon nom</h3>
+    <label for="newProfileName">Nom du détenteur du compte</label>
+    <input id="newProfileName" type="text" maxlength="100" autocomplete="name" placeholder="Entre ton nom">
+    <button type="button" id="saveProfileBtn">Enregistrer mon nom</button>
+    <p id="profileMsg" class="muted" aria-live="polite"></p>
+    <hr>
+    <h3>Mes contacts ELAWS</h3>
+    <p class="muted">Ajoute un contact avec l'adresse e-mail utilisée pour son compte ELAWS LOCATION. Seuls tes contacts apparaîtront dans la liste d'appel.</p>
+    <label for="contactEmail">E-mail du contact</label>
+    <input id="contactEmail" type="email" autocomplete="off" placeholder="contact@exemple.com">
+    <button type="button" id="addContactBtn">Ajouter ce contact</button>
+    <p id="contactsMsg" class="muted" aria-live="polite"></p>
+    <div class="tablewrap"><table><thead><tr><th>Nom</th><th>E-mail</th><th>Action</th></tr></thead><tbody id="contactRows"><tr><td colspan="3">Chargement des contacts…</td></tr></tbody></table></div>
+    <hr>
+    <h3>Paramètres du compte</h3>
+    <button type="button" id="changePasswordBtn">Changer mon mot de passe</button>
+    <button type="button" id="profileLogoutBtn" class="danger">Se déconnecter</button>
+  </section>
+
+</main>
+<footer>Prototype — les positions sont des données sensibles. Accès réservé aux personnes autorisées. Configure HTTPS, les politiques RLS et la rétention avant tout usage réel.</footer>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<!-- Supabase JS chargé par le chargeur de secours ci-dessous -->
+<script>
+/* ÉTAPE DE CONFIGURATION : remplace ces deux valeurs par celles de TON projet Supabase.
+   Ne mets JAMAIS une clé "service_role" ici. Seule la clé publishable/anon est prévue côté navigateur. */
+const SUPABASE_URL = "https://xeaprmzrhydjblbxndsy.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_yLc-zSPjy8zbNrDgUjzbyw_8bDoScu0";
+let sb = null, currentUser = null, map = null, markers = [];
+
+const $ = id => document.getElementById(id);
+function msg(id, text, error=false){ const el=$(id); el.textContent=text; el.style.color=error?"#a12432":""; }
+function configured(){ return SUPABASE_URL.startsWith("https://") && !SUPABASE_URL.includes("COLLE_ICI") && SUPABASE_ANON_KEY.length>20 && !SUPABASE_ANON_KEY.includes("COLLE_ICI"); }
+function showApp(show){
+  ["addCard","locationCard","dashboardCard","devicesCard"].forEach(id=>{
+    const el=$(id); if(el) el.classList.toggle("hidden",!show);
+  });
+  const profileCard=$("profileCard");
+  if(profileCard) profileCard.classList.add("hidden");
+  const callsCard=$("callsCard"); if(callsCard) callsCard.classList.toggle("hidden",!show);
+  const profileBtn=$("openProfileBtn");
+  if(profileBtn) profileBtn.classList.toggle("hidden",!show);
+}
+function ensureProfileButton(){
+  let btn=$("openProfileBtn");
+  if(btn) return;
+  btn=document.createElement("button");
+  btn.id="openProfileBtn";
+  btn.type="button";
+  btn.className="secondary wide";
+  btn.textContent="Mon profil et paramètres";
+  btn.style.margin="0";
+  const main=document.querySelector("main");
+  const authCard=$("authCard");
+  if(main && authCard && authCard.nextSibling){
+    main.insertBefore(btn,authCard.nextSibling);
+  }else if(main){
+    main.appendChild(btn);
+  }
+  btn.addEventListener("click",openProfile);
+}
+async function openProfile(){
+  if(!currentUser) return;
+  ["addCard","locationCard","dashboardCard","devicesCard"].forEach(id=>{
+    const el=$(id); if(el) el.classList.add("hidden");
+  });
+  $("profileCard").classList.remove("hidden");
+  $("profileEmail").textContent=currentUser.email || "Non renseigné";
+  $("profileRole").textContent=window.isAdmin ? "Administrateur" : "Utilisateur";
+  msg("profileMsg","");
+  const {data,error}=await sb.from("profiles").select("full_name,email,is_admin")
+    .eq("id",currentUser.id).maybeSingle();
+  if(error){
+    msg("profileMsg","Impossible de charger le profil : "+error.message,true);
+    return;
+  }
+  const name=data?.full_name || "";
+  $("profileName").textContent=name || "Non renseigné";
+  $("newProfileName").value=name;
+  await loadContacts();
+}
+async function saveProfileName(){
+  if(!currentUser) return;
+  const name=$("newProfileName").value.trim();
+  if(!name){
+    msg("profileMsg","Entre ton nom avant d'enregistrer.",true);
+    return;
+  }
+  const {error}=await sb.from("profiles").update({full_name:name}).eq("id",currentUser.id);
+  if(error){
+    msg("profileMsg","Enregistrement impossible : "+error.message,true);
+    return;
+  }
+  $("profileName").textContent=name;
+  msg("profileMsg","Nom enregistré avec succès.");
+}
+async function changePassword(){
+  if(!currentUser) return;
+  const password=prompt("Entre un nouveau mot de passe (au moins 10 caractères).");
+  if(password===null) return;
+  if(password.length<10){
+    alert("Le mot de passe doit contenir au moins 10 caractères.");
+    return;
+  }
+  const {error}=await sb.auth.updateUser({password});
+  if(error){
+    msg("profileMsg","Changement de mot de passe impossible : "+error.message,true);
+    return;
+  }
+  msg("profileMsg","Mot de passe modifié avec succès.");
+}
+async function logout(){
+  if(sb) await sb.auth.signOut();
+  currentUser=null;
+  window.isAdmin=false;
+  showApp(false);
+  $("authCard").classList.remove("hidden");
+  msg("authMsg","Déconnecté.");
+}
+const mapLayers = {};
+let accuracyCircles = [];
+function initMap(){
+  if(!window.L || !$("map")) return;
+  if(map){ setTimeout(()=>map.invalidateSize(),150); return; }
+  map=L.map("map").setView([6.13,1.22],12);
+  mapLayers.streets=L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{
+    maxZoom:19, attribution:'&copy; OpenStreetMap contributors'
+  });
+  mapLayers.satellite=L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",{
+    maxZoom:19, attribution:'Tiles &copy; Esri'
+  });
+  mapLayers.streets.addTo(map);
+  if($("mapLayer")) $("mapLayer").onchange=()=>{
+    Object.values(mapLayers).forEach(layer=>{if(map.hasLayer(layer))map.removeLayer(layer);});
+    (mapLayers[$("mapLayer").value]||mapLayers.streets).addTo(map);
+  };
+  if($("mapFocus")) $("mapFocus").onchange=refreshData;
+  setTimeout(()=>map.invalidateSize(),150);
+}
+async function sendPasswordReset(){
+  if(!configured()){msg("authMsg","La connexion Supabase n'est pas configurée.",true);return;}
+  const email=$("email").value.trim();
+  if(!email){msg("authMsg","Entre d'abord l'adresse e-mail de ton compte.",true);return;}
+  const {error}=await sb.auth.resetPasswordForEmail(email,{redirectTo:location.href.split("#")[0].split("?")[0]});
+  if(error){msg("authMsg","Impossible d'envoyer le lien : "+error.message,true);return;}
+  msg("authMsg","Si cette adresse correspond à un compte, un e-mail de réinitialisation va être envoyé. Vérifie aussi les courriers indésirables.");
+}
+async function signIn(signUp=false){
+  if(!configured()){msg("authMsg","Configure d'abord SUPABASE_URL et SUPABASE_ANON_KEY dans le fichier HTML.",true);return;}
+  if(!sb || !sb.auth){
+    await initializeSupabaseClient();
+    if(!sb || !sb.auth){msg("authMsg","La bibliothèque Supabase n'est pas disponible. Vérifie Internet et réessaie.",true);return;}
+  }
+  const email=$("email").value.trim(), password=$("password").value;
+  if(!email||password.length<10){msg("authMsg","Entre un e-mail et un mot de passe d'au moins 10 caractères.",true);return;}
+  const result=signUp ? await sb.auth.signUp({email,password}) : await sb.auth.signInWithPassword({email,password});
+  if(result.error){msg("authMsg",result.error.message,true);return;}
+  if(signUp && !result.data.session){msg("authMsg","Compte créé. Vérifie ton e-mail, puis connecte-toi. Ensuite, donne-toi le rôle admin avec le SQL du guide.");return;}
+  currentUser=result.data.user;
+  await loadApp();
+}
+async function loadApp(){
+  const {data:profile,error:pErr}=await sb
+    .from("profiles")
+    .select("is_admin, full_name, email")
+    .eq("id",currentUser.id)
+    .maybeSingle();
+
+  if(pErr){
+    showApp(false);$("authCard").classList.remove("hidden");
+    msg("authMsg","Profil inaccessible : "+pErr.message,true);
+    return;
+  }
+  if(!profile){
+    showApp(false);$("authCard").classList.remove("hidden");
+    msg("authMsg","Profil introuvable. Contacte l'administrateur.",true);
+    return;
+  }
+
+  window.isAdmin = profile.is_admin === true;
+  $("authCard").classList.add("hidden");
+  showApp(true);
+  ensureProfileButton();
+  initMap();
+  await refreshData();
+  await loadCallUsers();
+  if(!callPollTimer) callPollTimer=setInterval(pollCalls,3000);
+}
+async function refreshData(){
+  if(!sb||!currentUser)return;
+  const {data:devices,error}=await sb.from("devices")
+    .select("id,name,platform,model,imei,created_at").order("created_at",{ascending:false});
+  if(error){msg("locationMsg","Erreur de lecture : "+error.message,true);return;}
+  const ids=(devices||[]).map(d=>d.id);
+  let locs=[];
+  if(ids.length){
+    const res=await sb.from("locations").select("id,device_id,latitude,longitude,accuracy_m,recorded_at")
+      .in("device_id",ids).order("recorded_at",{ascending:false}).limit(500);
+    if(res.error){msg("locationMsg","Erreur positions : "+res.error.message,true);return;}
+    locs=res.data||[];
+  }
+  const latest=new Map();
+  locs.forEach(l=>{if(!latest.has(l.device_id))latest.set(l.device_id,l);});
+  $("deviceRows").innerHTML="";
+  $("locationDevice").innerHTML="";
+  (devices||[]).forEach(d=>{
+    const l=latest.get(d.id), tr=document.createElement("tr");
+    const values=[d.name,`${d.platform} / ${d.model||"Modèle non renseigné"}`,d.imei||"Non renseigné",
+      l?`${new Date(l.recorded_at).toLocaleString()} (${Number(l.latitude).toFixed(5)}, ${Number(l.longitude).toFixed(5)})${l.accuracy_m!=null?" ± "+Math.round(l.accuracy_m)+" m":""}`:"Aucune position"];
+    values.forEach(v=>{const td=document.createElement("td");td.textContent=v;tr.appendChild(td);});
+    const td=document.createElement("td"), wrap=document.createElement("div");
+    wrap.className="device-actions";
+    if(window.isAdmin){
+      const btn=document.createElement("button");btn.textContent="Supprimer";btn.className="danger";
+      btn.onclick=()=>deleteDevice(d.id,d.name);wrap.appendChild(btn);
+    }else{
+      const note=document.createElement("span");note.className="muted";note.textContent="Gestion admin";wrap.appendChild(note);
+    }
+    td.appendChild(wrap);tr.appendChild(td);$("deviceRows").appendChild(tr);
+    const opt=document.createElement("option");opt.value=d.id;opt.textContent=d.name;$("locationDevice").appendChild(opt);
+  });
+  if(!(devices||[]).length)$("deviceRows").innerHTML='<tr><td colspan="5">Aucun appareil accessible pour ce compte.</td></tr>';
+  markers.forEach(m=>m.remove());markers=[];
+  accuracyCircles.forEach(c=>c.remove());accuracyCircles=[];
+  if(map && window.L){
+    const showAll=$("mapFocus")?.value==="all";
+    const shown=showAll?locs:locs.filter(l=>latest.get(l.device_id)?.id===l.id);
+    shown.forEach(l=>{
+      const d=(devices||[]).find(x=>x.id===l.device_id);if(!d)return;
+      const when=new Date(l.recorded_at).toLocaleString();
+      const isOld=Date.now()-new Date(l.recorded_at).getTime()>24*60*60*1000;
+      const m=L.marker([l.latitude,l.longitude]).addTo(map).bindPopup(
+        `<strong>${escapeHtml(d.name)}</strong><br>Reçu : ${escapeHtml(when)}${isOld?"<br><b>Position ancienne</b>":""}<br>Précision estimée : ${l.accuracy_m==null?"inconnue":Math.round(l.accuracy_m)+" m"}`
+      );
+      markers.push(m);
+      if(l.accuracy_m!=null && Number(l.accuracy_m)>0 && Number(l.accuracy_m)<100000){
+        accuracyCircles.push(L.circle([l.latitude,l.longitude],{radius:Number(l.accuracy_m),color:"#1769aa",weight:1,fillOpacity:0.10}).addTo(map));
+      }
+    });
+    if(markers.length)map.fitBounds(L.featureGroup(markers).getBounds().pad(.18),{maxZoom:16});
+    setTimeout(()=>map.invalidateSize(),150);
+  }
+}
+function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
+async function addDevice(){
+  if(!$("consent").checked){alert("Confirme l'autorisation et l'information de l'utilisateur.");return;}
+  const name=$("deviceName").value.trim(), platform=$("platform").value, model=$("model").value.trim(), imei=$("imei").value.trim();
+  if(!name){alert("Donne un nom interne à l'appareil.");return;}
+  if(imei && !/^\d{14,16}$/.test(imei)){alert("L'IMEI doit contenir 14 à 16 chiffres, sans espaces.");return;}
+  if(!sb || !currentUser){alert("Connecte-toi avant d'enregistrer un appareil.");return;}
+  const {error}=await sb.from("devices").insert({name,platform,model:model||null,imei:imei||null,created_by:currentUser.id});
+  if(error){alert("Enregistrement impossible : "+error.message);return;}
+  $("deviceName").value="";$("model").value="";$("imei").value="";$("consent").checked=false;await refreshData();
+}
+async function sendLocation(){
+  if(!sb || !currentUser){msg("locationMsg","Connecte-toi avant d'envoyer une position.",true);return;}
+  const deviceId=$("locationDevice").value;if(!deviceId){msg("locationMsg","Enregistre d'abord un appareil.",true);return;}
+  if(!navigator.geolocation){msg("locationMsg","Ce navigateur ne prend pas en charge la géolocalisation.",true);return;}
+  msg("locationMsg","Demande de position en cours…");
+  navigator.geolocation.getCurrentPosition(async pos=>{
+    const payload={device_id:deviceId,latitude:pos.coords.latitude,longitude:pos.coords.longitude,accuracy_m:pos.coords.accuracy,recorded_at:new Date().toISOString(),submitted_by:currentUser.id};
+    const {error}=await sb.from("locations").insert(payload);
+    if(error){msg("locationMsg","Position non enregistrée : "+error.message,true);return;}
+    msg("locationMsg","Position reçue et enregistrée. Précision estimée : "+Math.round(pos.coords.accuracy)+" m.");await refreshData();
+  },err=>msg("locationMsg",({1:"Permission de localisation refusée.",2:"Position indisponible. Vérifie le GPS.",3:"Délai dépassé. Réessaie."}[err.code]||err.message),true),{enableHighAccuracy:true,timeout:20000,maximumAge:0});
+}
+async function deleteDevice(id,name){
+  if(!confirm(`Supprimer ${name} et son historique de positions ?`))return;
+  const {error}=await sb.from("devices").delete().eq("id",id);
+  if(error){alert("Suppression impossible : "+error.message);return;}await refreshData();
+}
+$("loginBtn").onclick=()=>signIn(false).catch(e=>msg("authMsg","Erreur de connexion : "+(e?.message||String(e)),true));
+$("signupBtn").onclick=()=>signIn(true).catch(e=>msg("authMsg","Erreur de création du compte : "+(e?.message||String(e)),true));
+$("forgotPasswordBtn").onclick=()=>sendPasswordReset().catch(e=>msg("authMsg","Erreur de réinitialisation : "+(e?.message||String(e)),true));
+$("addBtn").onclick=addDevice;$("locateBtn").onclick=sendLocation;$("refreshBtn").onclick=refreshData;
+$("logoutBtn").onclick=logout;
+$("profileLogoutBtn").onclick=logout;
+$("saveProfileBtn").onclick=saveProfileName;
+$("changePasswordBtn").onclick=changePassword;
+$("backToAppBtn").onclick=async()=>{
+  $("profileCard").classList.add("hidden");
+  showApp(true);
+  if(map) setTimeout(()=>map.invalidateSize(),100);
+};
+
+// Appels audio/vidéo WebRTC : appels acceptés explicitement, jamais de micro/caméra cachés.
+let callPollTimer=null, activeCallId=null, activeCallRole=null, activeCallMode='audio';
+let peer=null, localStream=null, seenIncomingCall=null, lastSignalStamp='';
+const callBusy=()=>!!activeCallId;
+function callMessage(t,err=false){msg('callMsg',t,err);}
+async function loadContacts(){
+  if(!sb||!currentUser)return [];
+  const body=$('contactRows');
+  if(body) body.innerHTML='<tr><td colspan="3">Chargement…</td></tr>';
+  const {data:users,error}=await sb.rpc('list_my_contacts');
+  if(error){if(body)body.innerHTML='<tr><td colspan="3">Table/fonction des contacts non configurée. Exécute le SQL fourni.</td></tr>';msg('contactsMsg','Impossible de lire les contacts : '+error.message,true);return null;}
+  if(body){body.innerHTML=''; if(!users.length)body.innerHTML='<tr><td colspan="3">Aucun contact ajouté pour le moment.</td></tr>';
+    users.forEach(u=>{const tr=document.createElement('tr');const name=document.createElement('td');name.textContent=u.full_name||'Sans nom';const email=document.createElement('td');email.textContent=u.email||'E-mail non visible';const act=document.createElement('td');const b=document.createElement('button');b.type='button';b.className='danger';b.textContent='Retirer';b.style.width='auto';b.onclick=()=>removeContact(u.id);act.appendChild(b);tr.append(name,email,act);body.appendChild(tr);});
+  }
+  return users;
+}
+async function loadCallUsers(){
+  if(!sb||!currentUser)return;
+  const sel=$('callUser'); sel.innerHTML='<option value="">Chargement des contacts…</option>';
+  const users=await loadContacts();
+  if(users===null){sel.innerHTML='<option value="">Contacts indisponibles</option>';callMessage('Configure la table user_contacts avec le SQL fourni.',true);return;}
+  sel.innerHTML='<option value="">Choisir un contact</option>';
+  users.filter(u=>u.id!==currentUser.id).forEach(u=>{const o=document.createElement('option');o.value=u.id;o.textContent=u.full_name||u.email||'Contact ELAWS';sel.appendChild(o);});
+  if(!users.length)callMessage('Ajoute d’abord des contacts dans Mon profil.');
+}
+async function addContact(){
+  if(!sb||!currentUser)return;
+  const email=$('contactEmail').value.trim().toLowerCase();
+  if(!email){msg('contactsMsg','Entre l’adresse e-mail du compte à ajouter.',true);return;}
+  if(currentUser.email&&email===currentUser.email.toLowerCase()){msg('contactsMsg','Tu ne peux pas t’ajouter toi-même.',true);return;}
+  const {data,error}=await sb.rpc('add_contact_by_email',{p_email:email});
+  if(error){msg('contactsMsg','Ajout impossible : '+error.message,true);return;}
+  if(!data){msg('contactsMsg','Aucun compte ELAWS ne correspond à cette adresse, ou tu essaies de t’ajouter toi-même.',true);return;}
+  $('contactEmail').value='';msg('contactsMsg','Contact ajouté. Il apparaît maintenant dans ta liste d’appel.');await loadCallUsers();
+}
+async function removeContact(id){
+  if(!confirm('Retirer ce contact de ta liste ?'))return;
+  const {error}=await sb.from('user_contacts').delete().eq('user_id',currentUser.id).eq('contact_id',id);
+  if(error){msg('contactsMsg','Suppression impossible : '+error.message,true);return;}
+  msg('contactsMsg','Contact retiré.');await loadCallUsers();
+}
+$('addContactBtn').onclick=addContact;
+
+function waitForIceGathering(pc){return new Promise(resolve=>{if(pc.iceGatheringState==='complete')return resolve();const done=()=>{if(pc.iceGatheringState==='complete'){pc.removeEventListener('icegatheringstatechange',done);resolve();}};pc.addEventListener('icegatheringstatechange',done);setTimeout(resolve,8000);});}
+function makePeer(){
+  const pc=new RTCPeerConnection({iceServers:[{urls:'stun:stun.l.google.com:19302'},{urls:'stun:stun1.l.google.com:19302'}]});
+  pc.ontrack=e=>{if($('remoteCallVideo'))$('remoteCallVideo').srcObject=e.streams[0];};
+  pc.onconnectionstatechange=()=>{if(pc.connectionState==='connected')callMessage('Appel connecté.'); if(['failed','disconnected'].includes(pc.connectionState))callMessage('Connexion instable ou impossible. Un serveur TURN peut être nécessaire.',true);};
+  return pc;
+}
+async function getMedia(mode){
+  if(!navigator.mediaDevices?.getUserMedia)throw new Error('Micro/caméra indisponible. Ouvre le site en HTTPS dans un navigateur compatible.');
+  return navigator.mediaDevices.getUserMedia({audio:true,video:mode==='video'});
+}
+async function startOutgoingCall(mode){
+  if(!currentUser||!sb)throw new Error('Connecte-toi avant d’appeler.');
+  if(callBusy())throw new Error('Un appel est déjà en cours. Raccroche avant d’en lancer un autre.');
+  const callee=$('callUser').value;if(!callee)throw new Error('Choisis d’abord un contact ajouté dans Mon profil.');
+  const {data:myContacts,error:contactErr}=await sb.rpc('list_my_contacts');
+  if(contactErr)throw new Error('Vérification des contacts impossible : '+contactErr.message);
+  if(!(myContacts||[]).some(u=>u.id===callee))throw new Error('Tu peux appeler uniquement une personne de ta liste de contacts.');
+  if(!navigator.onLine)throw new Error('Aucune connexion Internet détectée.');
+  activeCallMode=mode;callMessage('Préparation de l’appel…');
+  const {data,error}=await sb.from('call_sessions').insert({caller_id:currentUser.id,callee_id:callee,status:'ringing'}).select('id').single();
+  if(error)throw new Error('Impossible de créer l’appel : '+error.message);
+  activeCallId=data.id;activeCallRole='caller';
+  try{
+    localStream=await getMedia(mode);$('localCallVideo').srcObject=localStream;$('activeCallBox').classList.remove('hidden');$('activeCallText').textContent=mode==='video'?'Appel vidéo sortant':'Appel audio sortant';
+    $('localCallVideo').style.display=mode==='video'?'block':'none';$('remoteCallVideo').style.display=mode==='video'?'block':'none';
+    peer=makePeer();localStream.getTracks().forEach(t=>peer.addTrack(t,localStream));
+    const offer=await peer.createOffer();await peer.setLocalDescription(offer);await waitForIceGathering(peer);
+    const {error:signalError}=await sb.rpc('set_call_signal',{p_call_id:activeCallId,p_kind:'offer',p_payload:peer.localDescription});
+    if(signalError)throw new Error('Offre non envoyée : '+signalError.message);
+    callMessage('Appel lancé. En attente de la réponse…');startCallPolling();
+  }catch(e){await finishCall(false);throw e;}
+}
+async function acceptIncomingCall(){
+  if(!seenIncomingCall) return;
+  const c=seenIncomingCall;activeCallId=c.id;activeCallRole='callee';activeCallMode=(c.offer?.sdp||'').includes('m=video')?'video':'audio';
+  try{
+    const {error}=await sb.rpc('respond_to_call',{p_call_id:c.id,p_response:'accept'});if(error)throw new Error('Impossible d’accepter : '+error.message);
+    localStream=await getMedia(activeCallMode);$('localCallVideo').srcObject=localStream;$('activeCallBox').classList.remove('hidden');$('incomingCallBox').classList.add('hidden');
+    $('activeCallText').textContent='Appel entrant accepté';$('localCallVideo').style.display=activeCallMode==='video'?'block':'none';$('remoteCallVideo').style.display=activeCallMode==='video'?'block':'none';
+    peer=makePeer();localStream.getTracks().forEach(t=>peer.addTrack(t,localStream));
+    callMessage('Connexion à l’appel…');startCallPolling();
+  }catch(e){await finishCall(false);callMessage(e.message,true);}
+}
+async function rejectIncomingCall(){if(!seenIncomingCall)return;const id=seenIncomingCall.id;try{await sb.rpc('respond_to_call',{p_call_id:id,p_response:'reject'});}catch(e){} seenIncomingCall=null;$('incomingCallBox').classList.add('hidden');callMessage('Appel refusé.');}
+async function pollCalls(){
+  if(!sb||!currentUser)return;
+  try{
+    if(!activeCallId){const {data,error}=await sb.from('call_sessions').select('id,caller_id,callee_id,status,offer,answer,created_at').eq('callee_id',currentUser.id).eq('status','ringing').order('created_at',{ascending:false}).limit(1);if(!error&&data?.length){const c=data[0];if(seenIncomingCall?.id!==c.id){seenIncomingCall=c;$('incomingCallText').textContent='Appel entrant. Appuie sur Accepter pour activer le micro/caméra.';$('incomingCallBox').classList.remove('hidden');callMessage('Tu as un appel entrant.');}}}
+    if(!activeCallId)return;
+    const {data:c,error}=await sb.from('call_sessions').select('id,caller_id,callee_id,status,offer,answer').eq('id',activeCallId).maybeSingle();
+    if(error||!c)return;
+    if(['ended','rejected','cancelled'].includes(c.status)){await finishCall(false);callMessage(c.status==='rejected'?'Appel refusé.':'L’appel est terminé.');return;}
+    if(activeCallRole==='caller'&&c.status==='accepted'&&c.answer&&peer&&peer.signalingState!=='stable'){
+      const stamp=JSON.stringify(c.answer);if(lastSignalStamp!==stamp){lastSignalStamp=stamp;await peer.setRemoteDescription(new RTCSessionDescription(c.answer));callMessage('Réponse reçue, connexion en cours…');}
+    }
+    if(activeCallRole==='callee'&&c.offer&&peer&&!peer.currentRemoteDescription){activeCallMode=(c.offer.sdp||'').includes('m=video')?'video':'audio';await peer.setRemoteDescription(new RTCSessionDescription(c.offer));const answer=await peer.createAnswer();await peer.setLocalDescription(answer);await waitForIceGathering(peer);const {error:se}=await sb.rpc('set_call_signal',{p_call_id:activeCallId,p_kind:'answer',p_payload:peer.localDescription});if(se)throw new Error(se.message);callMessage('Réponse envoyée, connexion en cours…');}
+  }catch(e){callMessage('Erreur pendant l’appel : '+(e.message||e),true);}
+}
+function startCallPolling(){if(callPollTimer)clearInterval(callPollTimer);pollCalls();callPollTimer=setInterval(pollCalls,1800);}
+async function finishCall(sendEnd=true){
+  const id=activeCallId;activeCallId=null;activeCallRole=null;seenIncomingCall=null;lastSignalStamp='';if(callPollTimer){clearInterval(callPollTimer);callPollTimer=null;}
+  if(peer){try{peer.close();}catch(e){}peer=null;}if(localStream){localStream.getTracks().forEach(t=>t.stop());localStream=null;}
+  if($('localCallVideo'))$('localCallVideo').srcObject=null;if($('remoteCallVideo'))$('remoteCallVideo').srcObject=null;
+  $('activeCallBox')?.classList.add('hidden');$('incomingCallBox')?.classList.add('hidden');
+  if(sendEnd&&id&&sb){const {error}=await sb.rpc('end_call',{p_call_id:id});if(error)callMessage('Appel local fermé. État serveur : '+error.message,true);}
+}
+$('audioCallBtn').onclick=()=>startOutgoingCall('audio').catch(e=>callMessage(e.message||String(e),true));
+$('videoCallBtn').onclick=()=>startOutgoingCall('video').catch(e=>callMessage(e.message||String(e),true));
+$('acceptCallBtn').onclick=()=>acceptIncomingCall();$('rejectCallBtn').onclick=()=>rejectIncomingCall();$('hangupCallBtn').onclick=()=>finishCall(true).then(()=>callMessage('Tu as raccroché.'));
+
+
+let supabaseClientReady = false;
+let supabaseLoadPromise = null;
+async function initializeSupabaseClient(){
+  if(sb && sb.auth){supabaseClientReady=true;return true;}
+  if(!configured()){
+    msg("authMsg","Les paramètres Supabase ne sont pas configurés.",true);
+    return false;
+  }
+  if(window.supabase && typeof window.supabase.createClient==="function"){
+    sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY);
+    supabaseClientReady=!!(sb && sb.auth);
+    if(supabaseClientReady) return true;
+  }
+  if(supabaseLoadPromise) return supabaseLoadPromise;
+  supabaseLoadPromise = new Promise(resolve=>{
+    // Charger explicitement la version UMD destinée aux navigateurs.
+    // L'URL racine du paquet npm ne garantit pas la création de window.supabase.
+    const urls=[
+      "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js",
+      "https://unpkg.com/@supabase/supabase-js@2/dist/umd/supabase.js"
+    ];
+    let index=0;
+    const tryNext=()=>{
+      if(window.supabase && typeof window.supabase.createClient==="function"){
+        try{
+          sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY);
+          supabaseClientReady=!!(sb && sb.auth);
+          resolve(supabaseClientReady);
+        }catch(e){resolve(false);}
+        return;
+      }
+      if(index>=urls.length){resolve(false);return;}
+      const script=document.createElement("script");
+      script.src=urls[index++];
+      script.async=true;
+      script.onload=()=>{
+        if(window.supabase && typeof window.supabase.createClient==="function"){
+          try{
+            sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY);
+            supabaseClientReady=!!(sb && sb.auth);
+            resolve(supabaseClientReady);
+          }catch(e){tryNext();}
+        }else{tryNext();}
+      };
+      script.onerror=()=>{
+        script.remove();
+        tryNext();
+      };
+      document.head.appendChild(script);
+    };
+    tryNext();
+  });
+  const ready=await supabaseLoadPromise;
+  if(!ready) msg("authMsg","Impossible de charger la bibliothèque Supabase depuis les deux serveurs. Vérifie la connexion, désactive temporairement le bloqueur de contenu si tu en utilises un, puis recharge la page.",true);
+  return ready;
+}
+
+(async function startElaws(){
+  if(!configured()){
+    msg("authMsg","Prêt à configurer : vérifie l'URL et la clé publique Supabase dans le fichier HTML.",true);
+    return;
+  }
+  msg("authMsg","Connexion au service Supabase…");
+  const ready=await initializeSupabaseClient();
+  if(!ready) return;
+  const {data,error}=await sb.auth.getSession();
+  if(error){msg("authMsg","Impossible de lire la session : "+error.message,true);return;}
+  if(data?.session?.user){currentUser=data.session.user;await loadApp();}
+  sb.auth.onAuthStateChange((event,session)=>{
+    if(event==="PASSWORD_RECOVERY"){
+      const next=prompt("Entre ton nouveau mot de passe (au moins 10 caractères).");
+      if(next && next.length>=10) sb.auth.updateUser({password:next}).then(({error})=>{
+        if(error) alert("Mot de passe non modifié : "+error.message);
+        else alert("Mot de passe modifié. Tu peux te connecter.");
+      });
+      else if(next!==null) alert("Le mot de passe doit contenir au moins 10 caractères.");
+    }
+  });
+})();
+if("serviceWorker" in navigator && location.protocol.startsWith("http"))navigator.serviceWorker.register("./sw.js").catch(()=>{});
+</script>
+</body>
+</html>
