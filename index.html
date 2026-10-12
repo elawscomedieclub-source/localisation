@@ -88,7 +88,7 @@
     <p class="muted">Choisis un utilisateur connecté à ELAWS LOCATION. L'appel ne démarre que si l'autre personne l'accepte. Autorise le micro/la caméra dans le navigateur.</p>
     <label for="callUser">Appeler un utilisateur</label><select id="callUser"><option value="">Chargement des utilisateurs…</option></select>
     <div class="row two"><button type="button" id="audioCallBtn">Appel audio</button><button type="button" id="videoCallBtn">Appel vidéo</button></div>
-    <p id="callMsg" class="muted" aria-live="polite">Les appels nécessitent HTTPS et des autorisations micro/caméra.</p>
+    <p id="callMsg" class="muted" aria-live="polite">Les appels nécessitent HTTPS. Sonnerie dans la page ouverte; notifications hors page nécessitent une configuration Push.</p>
     <div id="incomingCallBox" class="notice hidden"><strong id="incomingCallText">Appel entrant</strong><div class="row two"><button type="button" id="acceptCallBtn">Accepter</button><button type="button" class="danger" id="rejectCallBtn">Refuser</button></div></div>
     <div id="activeCallBox" class="hidden"><p id="activeCallText">Appel en cours…</p><div class="row two"><div><label>Moi</label><video id="localCallVideo" autoplay muted playsinline style="width:100%;background:#111;border-radius:8px;max-height:240px"></video></div><div><label>Correspondant</label><video id="remoteCallVideo" autoplay playsinline style="width:100%;background:#111;border-radius:8px;max-height:240px"></video></div></div><button type="button" class="danger" id="hangupCallBtn">Raccrocher</button></div>
   </section>
@@ -391,6 +391,45 @@ $("backToAppBtn").onclick=async()=>{
 // Appels audio/vidéo WebRTC : appels acceptés explicitement, jamais de micro/caméra cachés.
 let callPollTimer=null, activeCallId=null, activeCallRole=null, activeCallMode='audio';
 let peer=null, localStream=null, seenIncomingCall=null, lastSignalStamp='';
+let incomingAlertTimer=null, incomingTimeoutTimer=null, incomingAudioContext=null;
+const INCOMING_RING_SECONDS=45;
+function stopIncomingAlert(){
+  if(incomingAlertTimer){clearInterval(incomingAlertTimer);incomingAlertTimer=null;}
+  if(incomingTimeoutTimer){clearTimeout(incomingTimeoutTimer);incomingTimeoutTimer=null;}
+  if(navigator.vibrate) navigator.vibrate(0);
+  if(incomingAudioContext){incomingAudioContext.close().catch(()=>{});incomingAudioContext=null;}
+}
+function ringOnce(){
+  try{
+    const Ctx=window.AudioContext||window.webkitAudioContext;
+    if(Ctx){
+      if(!incomingAudioContext) incomingAudioContext=new Ctx();
+      if(incomingAudioContext.state==='suspended') incomingAudioContext.resume().catch(()=>{});
+      const osc=incomingAudioContext.createOscillator(), gain=incomingAudioContext.createGain();
+      osc.type='sine';osc.frequency.value=880;gain.gain.setValueAtTime(0.0001,incomingAudioContext.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.12,incomingAudioContext.currentTime+0.03);
+      gain.gain.setValueAtTime(0.12,incomingAudioContext.currentTime+0.28);
+      gain.gain.exponentialRampToValueAtTime(0.0001,incomingAudioContext.currentTime+0.42);
+      osc.connect(gain);gain.connect(incomingAudioContext.destination);osc.start();osc.stop(incomingAudioContext.currentTime+0.43);
+    }
+  }catch(e){}
+  if(navigator.vibrate) navigator.vibrate([350,180,350]);
+}
+function startIncomingAlert(call){
+  stopIncomingAlert();
+  // Audio can be blocked by Android/Chrome until the user has interacted with this page.
+  ringOnce();incomingAlertTimer=setInterval(ringOnce,1800);
+  if('Notification' in window && Notification.permission==='granted'){
+    try{new Notification('ELAWS LOCATION — Appel entrant',{body:'Ouvre ELAWS LOCATION pour accepter ou refuser.',tag:'elaws-call-'+call.id});}catch(e){}
+  }
+  incomingTimeoutTimer=setTimeout(async()=>{
+    if(seenIncomingCall?.id!==call.id || activeCallId) return;
+    stopIncomingAlert();seenIncomingCall=null;
+    $('incomingCallBox').classList.add('hidden');
+    try{await sb.rpc('respond_to_call',{p_call_id:call.id,p_response:'reject'});}catch(e){}
+    callMessage('Appel manqué : aucune réponse après 45 secondes.');
+  },INCOMING_RING_SECONDS*1000);
+}
 const callBusy=()=>!!activeCallId;
 function callMessage(t,err=false){msg('callMsg',t,err);}
 async function loadContacts(){
@@ -466,20 +505,20 @@ async function startOutgoingCall(mode){
 }
 async function acceptIncomingCall(){
   if(!seenIncomingCall) return;
-  const c=seenIncomingCall;activeCallId=c.id;activeCallRole='callee';activeCallMode=(c.offer?.sdp||'').includes('m=video')?'video':'audio';
+  const c=seenIncomingCall;stopIncomingAlert();activeCallId=c.id;activeCallRole='callee';activeCallMode=(c.offer?.sdp||'').includes('m=video')?'video':'audio';
   try{
-    const {error}=await sb.rpc('respond_to_call',{p_call_id:c.id,p_response:'accept'});if(error)throw new Error('Impossible d’accepter : '+error.message);
+    const {error}=await sb.rpc('respond_to_call',{p_call_id:c.id,p_response:'accepted'});if(error)throw new Error('Impossible d’accepter : '+error.message);
     localStream=await getMedia(activeCallMode);$('localCallVideo').srcObject=localStream;$('activeCallBox').classList.remove('hidden');$('incomingCallBox').classList.add('hidden');
     $('activeCallText').textContent='Appel entrant accepté';$('localCallVideo').style.display=activeCallMode==='video'?'block':'none';$('remoteCallVideo').style.display=activeCallMode==='video'?'block':'none';
     peer=makePeer();localStream.getTracks().forEach(t=>peer.addTrack(t,localStream));
     callMessage('Connexion à l’appel…');startCallPolling();
   }catch(e){await finishCall(false);callMessage(e.message,true);}
 }
-async function rejectIncomingCall(){if(!seenIncomingCall)return;const id=seenIncomingCall.id;try{await sb.rpc('respond_to_call',{p_call_id:id,p_response:'reject'});}catch(e){} seenIncomingCall=null;$('incomingCallBox').classList.add('hidden');callMessage('Appel refusé.');}
+async function rejectIncomingCall(){if(!seenIncomingCall)return;stopIncomingAlert();const id=seenIncomingCall.id;try{await sb.rpc('respond_to_call',{p_call_id:id,p_response:'rejected'});}catch(e){} seenIncomingCall=null;$('incomingCallBox').classList.add('hidden');callMessage('Appel refusé.');}
 async function pollCalls(){
   if(!sb||!currentUser)return;
   try{
-    if(!activeCallId){const {data,error}=await sb.from('call_sessions').select('id,caller_id,callee_id,status,offer,answer,created_at').eq('callee_id',currentUser.id).eq('status','ringing').order('created_at',{ascending:false}).limit(1);if(!error&&data?.length){const c=data[0];if(seenIncomingCall?.id!==c.id){seenIncomingCall=c;$('incomingCallText').textContent='Appel entrant. Appuie sur Accepter pour activer le micro/caméra.';$('incomingCallBox').classList.remove('hidden');callMessage('Tu as un appel entrant.');}}}
+    if(!activeCallId){const {data,error}=await sb.from('call_sessions').select('id,caller_id,callee_id,status,offer,answer,created_at').eq('callee_id',currentUser.id).eq('status','ringing').order('created_at',{ascending:false}).limit(1);if(!error&&data?.length){const c=data[0];if(seenIncomingCall?.id!==c.id){seenIncomingCall=c;$('incomingCallText').textContent='Appel entrant. Appuie sur Accepter pour activer le micro/caméra.';$('incomingCallBox').classList.remove('hidden');callMessage('Appel entrant : sonnerie pendant 45 secondes.');startIncomingAlert(c);}}}
     if(!activeCallId)return;
     const {data:c,error}=await sb.from('call_sessions').select('id,caller_id,callee_id,status,offer,answer').eq('id',activeCallId).maybeSingle();
     if(error||!c)return;
@@ -492,7 +531,7 @@ async function pollCalls(){
 }
 function startCallPolling(){if(callPollTimer)clearInterval(callPollTimer);pollCalls();callPollTimer=setInterval(pollCalls,1800);}
 async function finishCall(sendEnd=true){
-  const id=activeCallId;activeCallId=null;activeCallRole=null;seenIncomingCall=null;lastSignalStamp='';if(callPollTimer){clearInterval(callPollTimer);callPollTimer=null;}
+  const id=activeCallId;stopIncomingAlert();activeCallId=null;activeCallRole=null;seenIncomingCall=null;lastSignalStamp='';if(callPollTimer){clearInterval(callPollTimer);callPollTimer=null;}
   if(peer){try{peer.close();}catch(e){}peer=null;}if(localStream){localStream.getTracks().forEach(t=>t.stop());localStream=null;}
   if($('localCallVideo'))$('localCallVideo').srcObject=null;if($('remoteCallVideo'))$('remoteCallVideo').srcObject=null;
   $('activeCallBox')?.classList.add('hidden');$('incomingCallBox')?.classList.add('hidden');
@@ -500,7 +539,8 @@ async function finishCall(sendEnd=true){
 }
 $('audioCallBtn').onclick=()=>startOutgoingCall('audio').catch(e=>callMessage(e.message||String(e),true));
 $('videoCallBtn').onclick=()=>startOutgoingCall('video').catch(e=>callMessage(e.message||String(e),true));
-$('acceptCallBtn').onclick=()=>acceptIncomingCall();$('rejectCallBtn').onclick=()=>rejectIncomingCall();$('hangupCallBtn').onclick=()=>finishCall(true).then(()=>callMessage('Tu as raccroché.'));
+$('acceptCallBtn').onclick=()=>acceptIncomingCall();$('rejectCallBtn').onclick=()=>rejectIncomingCall();
+$('callsCard').addEventListener('click',()=>{if('Notification' in window && Notification.permission==='default')Notification.requestPermission().catch(()=>{});},{once:true});$('hangupCallBtn').onclick=()=>finishCall(true).then(()=>callMessage('Tu as raccroché.'));
 
 
 let supabaseClientReady = false;
