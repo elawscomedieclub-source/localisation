@@ -624,5 +624,19 @@ async function initializeSupabaseClient(){
 })();
 if("serviceWorker" in navigator && location.protocol.startsWith("http"))navigator.serviceWorker.register("./sw.js").catch(()=>{});
 </script>
+<script>
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", async function () {
+    try {
+      await navigator.serviceWorker.register(
+        "/localisation/service-worker.js"
+      );
+      console.log("Service Worker enregistré");
+    } catch (error) {
+      console.error("Erreur Service Worker :", error);
+    }
+  });
+}
+</script>
 </body>
 </html>
